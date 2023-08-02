@@ -3,8 +3,10 @@ import logging
 import threading
 import time
 from typing import Optional
-
+from astropy.coordinates import EarthLocation, get_sun, AltAz
+import astropy.units as u
 import serial
+from astropy.time import Time
 
 
 class Report:
@@ -35,6 +37,8 @@ class UnihedronSQM:
         rtscts: bool = False,
         timeout: int = 10,
         interval: int = 10,
+        location: Optional[tuple[float, float, float]] = None,
+        max_sun_alt: float = 10.0,
         *args,
         **kwargs,
     ):
@@ -63,6 +67,14 @@ class UnihedronSQM:
 
         # stuff
         self.interval = interval
+
+        # location
+        self.location = (
+            None
+            if location is None
+            else EarthLocation(lon=location[0] * u.deg, lat=location[1] * u.deg, height=location[2] * u.m)
+        )
+        self.max_sun_alt = max_sun_alt
 
         # poll thread
         self._closing = None
@@ -109,6 +121,16 @@ class UnihedronSQM:
 
         # loop until closing
         while not self._closing.is_set():
+            # what about the sun?
+            if self.location is not None:
+                # get sun location
+                sun = get_sun(Time.now()).transform_to(AltAz(location=self.location, obstime=Time.now()))
+
+                # check it
+                if sun.alt.degree > self.max_sun_alt:
+                    time.sleep(30)
+                    continue
+
             # get serial connection
             if self._conn is None:
                 logging.info("connecting to Unihedron SQM sensor")

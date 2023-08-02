@@ -50,7 +50,14 @@ class JsonHandler(tornado.web.RequestHandler):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, log_file: str = None, log_current: str = None, log_average: str = None, *args, **kwargs):
+    def __init__(
+        self,
+        log_file: str = None,
+        log_current: str = None,
+        log_average: str = None,
+        *args,
+        **kwargs,
+    ):
         # static path
         static_path = os.path.join(os.path.dirname(__file__), "static_html/")
 
@@ -167,6 +174,8 @@ def main():
     parser.add_argument("--stopbits", type=int, help="Number of stop bits", default=1)
     parser.add_argument("--rtscts", type=bool, help="Use RTSCTS?", default=False)
     parser.add_argument("--log-file", type=str, help="Log file for average values")
+    parser.add_argument("--location", type=float, help="Lon, Lat and Height of observer", nargs=3)
+    parser.add_argument("--max-sun-alt", type=float, help="Maximum altitude of sun to do measurements", default=10.0)
     parser.add_argument("--influx", type=str, help="Four strings containing URL, token, org, and bucket", nargs=4)
     args = parser.parse_args()
 

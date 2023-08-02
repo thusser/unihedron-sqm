@@ -11,5 +11,5 @@ setup(
     entry_points={"console_scripts": ["sqm-web=sqm.web:main"]},
     package_data={"sqm": ["*.html", "static_html/*.css"]},
     include_package_data=True,
-    install_requires=["pyserial", "tornado", "apscheduler", "numpy"],
+    install_requires=["pyserial", "tornado", "apscheduler", "numpy", "influxdb_client", "astropy"],
 )
