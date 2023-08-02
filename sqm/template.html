@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Unihedron Sky Quality Meter</title>
+    <link rel="stylesheet" href="/static/bootstrap.min.css">
+    <style>
+        .container {
+            margin-top: 2em;
+        }
+        h3 {
+            margin-top: 1em;
+        }
+        th, td {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>Unihedron Sky Quality Meter</h2>
+    <h3>Current</h3>
+    <table class="table table-sm">
+        <thead>
+        <tr>
+            <th>Time [UT]</th>
+            <th>Sky brightness [mag/arcsec^2]</th>
+        </tr>
+        </thead>
+        {% if current is not None %}
+        <tr>
+            <td>{{ current.format_string('time') }}</td>
+            <td>{{ current.format_string('ambientTemperature') }}</td>
+        </tr>
+        {% end %}
+    </table>
+
+    <h3>History</h3>
+    <table class="table table-sm table-striped table-hover">
+        <thead>
+        <tr>
+            <th>Time [UT]</th>
+            <th>Sky brightness [mag/arcsec^2]</th>
+        </tr>
+        </thead>
+        {% for h in history %}
+        <tr>
+            <td>{{ h.format_string('time') }}</td>
+            <td>{{ h.format_string('ambientTemperature') }}</td>
+        </tr>
+        {% end %}
+    </table>
+</div>
+</body>
+</html>
