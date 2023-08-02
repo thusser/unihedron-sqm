@@ -23,13 +23,19 @@
         <thead>
         <tr>
             <th>Time [UT]</th>
+            <th>Sensor temperature [C]</th>
+            <th>Sensor frequency [Hz]</th>
+            <th>Ticks uC</th>
             <th>Sky brightness [mag/arcsec^2]</th>
         </tr>
         </thead>
         {% if current is not None %}
         <tr>
-            <td>{{ current.format_string('time') }}</td>
-            <td>{{ current.format_string('ambientTemperature') }}</td>
+            <td>{{ current.time.strftime("%Y-%m-%dT%H:%M:%S") }}</td>
+            <td>{{ round(current.values['temp_sensor'], 2) }}</td>
+            <td>{{ round(current.values['freq_sensor'], 2) }}</td>
+            <td>{{ round(current.values['ticks_uC'], 2) }}</td>
+            <td>{{ round(current.values['sky_brightness'], 2) }}</td>
         </tr>
         {% end %}
     </table>
@@ -39,13 +45,19 @@
         <thead>
         <tr>
             <th>Time [UT]</th>
+            <th>Sensor temperature [C]</th>
+            <th>Sensor frequency [Hz]</th>
+            <th>Ticks uC</th>
             <th>Sky brightness [mag/arcsec^2]</th>
         </tr>
         </thead>
         {% for h in history %}
         <tr>
-            <td>{{ h.format_string('time') }}</td>
-            <td>{{ h.format_string('ambientTemperature') }}</td>
+            <td>{{ h.time.strftime("%Y-%m-%dT%H:%M:%S") }}</td>
+            <td>{{ round(h.values['temp_sensor'], 2) }}</td>
+            <td>{{ round(h.values['freq_sensor'], 2) }}</td>
+            <td>{{ round(h.values['ticks_uC'], 2) }}</td>
+            <td>{{ round(h.values['sky_brightness'], 2) }}</td>
         </tr>
         {% end %}
     </table>

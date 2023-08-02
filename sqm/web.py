@@ -11,8 +11,10 @@ from apscheduler.triggers.cron import CronTrigger
 import logging
 import numpy as np
 
-from lambrecht.influx import Influx
-from .lambrecht import Lambrecht
+from sqm.influx import Influx
+from sqm.sqm import UnihedronSQM, Report
+
+COLUMNS = ["temp_sensor", "freq_sensor", "ticks_uC", "sky_brightness"]
 
 
 class MainHandler(tornado.web.RequestHandler):
@@ -37,17 +39,14 @@ class JsonHandler(tornado.web.RequestHandler):
 
         # get record
         if which == "current":
-            time, values = self.application.current
+            report = self.application.current
         elif which == "average":
-            time, values = self.application.average
+            report = self.application.average
         else:
             raise tornado.web.HTTPError(404)
 
-        # get data
-        values["time"] = time
-
         # send to client
-        self.write(json.dumps(values))
+        self.write(json.dumps(report))
 
 
 class Application(tornado.web.Application):
@@ -66,9 +65,9 @@ class Application(tornado.web.Application):
         )
 
         # init other stuff
-        self.current: dict[str, float] = {}
-        self.buffer: list[tuple[Optional[datetime.datetime], dict[str, float]]] = []
-        self.history: list[tuple[Optional[datetime.datetime], dict[str, float]]] = []
+        self.current: Report = Report()
+        self.buffer: list[Report] = []
+        self.history: list[Report] = []
         self.log_file = log_file
         self.log_current = log_current
         self.log_average = log_average
@@ -77,11 +76,12 @@ class Application(tornado.web.Application):
         self._load_history()
 
     @property
-    def average(self) -> tuple[Optional[datetime.datetime], dict[str, float]]:
-        return self.history[0] if len(self.history) > 0 else (None, {})
+    def average(self) -> Report:
+        return self.history[0] if len(self.history) > 0 else Report()
 
-    def callback(self, time: datetime.datetime, values: dict[str, float]):
-        self.current = (time, values)
+    def callback(self, report: Report):
+        self.current = report
+        self.buffer.append(report)
 
     def _load_history(self):
         """Load history from log file"""
@@ -93,7 +93,7 @@ class Application(tornado.web.Application):
         # open file
         with open(self.log_file, "r") as csv:
             # check header
-            if csv.readline() != "time,skymag\n":
+            if csv.readline() != f"time,{','.join(COLUMNS)}\n":
                 logging.error("Invalid log file format.")
                 return
 
@@ -101,21 +101,21 @@ class Application(tornado.web.Application):
             for line in csv:
                 # split and check
                 split = line.split(",")
-                if len(split) != 2:
+                if len(split) != len(COLUMNS) + 1:
                     logging.error("Invalid log file format.")
                     continue
 
                 # read line
+                values = {c: float(s) for c, s in zip(COLUMNS, split[1:])}
                 time = datetime.datetime.strptime(split[0], "%Y-%m-%dT%H:%M:%S")
-                values = [float(s) for s in split[1:]]
-                self.buffer.append((time, values))
+                self.history.append(Report(values, time))
 
         # crop
         self._crop_history()
 
     def _crop_history(self):
         # sort history
-        self.history = sorted(self.history, key=lambda h: h[0], reverse=True)
+        self.history = sorted(self.history, key=lambda h: h.time, reverse=True)
 
         # crop to 10 entries
         if len(self.history) > 10:
@@ -127,11 +127,11 @@ class Application(tornado.web.Application):
             return
 
         # average reports
-        time = self.buffer[0][0]
-        average = {k: np.mean([b[1][k] for b in self.buffer]) for k in self.current.keys()}
+        average = {k: np.mean([b.values[k] for b in self.buffer]) for k in COLUMNS}
+        time = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
 
         # add to history
-        self.history.append((time, average))
+        self.history.append(Report(average))
         self._crop_history()
 
         # write to log file?
@@ -140,23 +140,28 @@ class Application(tornado.web.Application):
             if not os.path.exists(self.log_file):
                 # write header
                 with open(self.log_file, "w") as csv:
-                    csv.write("time,skymag\n")
+                    csv.write(f"time,{','.join(COLUMNS)}\n")
 
             # write line
             with open(self.log_file, "a") as csv:
-                fmt = "{time},{skymag.2f}"
-                csv.write(fmt.format(time=time.strftime("%Y-%m-%dT%H:%M:%S"), **average))
+                fmt = "{time}," + ",".join(["{" + c + ":.2f}" for c in COLUMNS])
+                csv.write(fmt.format(time=time, **average))
+                csv.write("\n")
 
         # reset reports
         self.buffer.clear()
 
 
 def main():
+    # logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d %(message)s")
+
     # parser
     parser = argparse.ArgumentParser("Lambrecht meteo data logger")
     parser.add_argument("--http-port", type=int, help="HTTP port for web interface", default=8122)
-    parser.add_argument("--port", type=str, help="Serial port to Lambrecht", default="/dev/ttyUSB1")
-    parser.add_argument("--baudrate", type=int, help="Baud rate", default=4800)
+    parser.add_argument("--interval", type=int, help="Interval between measurements in secs", default=10)
+    parser.add_argument("--port", type=str, help="Serial port to Lambrecht", default="/dev/ttyUSB0")
+    parser.add_argument("--baudrate", type=int, help="Baud rate", default=115200)
     parser.add_argument("--bytesize", type=int, help="Byte size", default=8)
     parser.add_argument("--parity", type=str, help="Parity bit", default="N")
     parser.add_argument("--stopbits", type=int, help="Number of stop bits", default=1)
@@ -165,24 +170,25 @@ def main():
     parser.add_argument("--influx", type=str, help="Four strings containing URL, token, org, and bucket", nargs=4)
     args = parser.parse_args()
 
-    # create Lambrecht object
-    lambrecht = Lambrecht(**vars(args))
+    # create SQM object
+    sqm = UnihedronSQM(**vars(args))
 
     # init app
     application = Application(**vars(args))
 
     # influx
-    influx = Influx(*args.influx)
+    p = [] if args.influx is None else args.influx
+    influx = Influx(*p)
     influx.start()
 
     # callback method
-    def callback(time: datetime.datetime, values: dict[str, float]):
+    def callback(report: Report):
         # forward to application and influx
-        application.callback(time, values)
-        influx(time, values)
+        application.callback(report)
+        influx(report)
 
     # start polling
-    lambrecht.start_polling(callback)
+    sqm.start_polling(callback)
 
     # init tornado web server
     http_server = tornado.httpserver.HTTPServer(application)
@@ -202,7 +208,7 @@ def main():
 
     # stop polling
     influx.stop()
-    lambrecht.stop_polling()
+    sqm.stop_polling()
     sched.shutdown()
 
 

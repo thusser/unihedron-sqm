@@ -2,8 +2,24 @@ import datetime
 import logging
 import threading
 import time
+from typing import Optional
 
 import serial
+
+
+class Report:
+    def __init__(self, values: Optional[dict[str, float]] = None, dt: Optional[datetime.datetime] = None):
+        self.values = (
+            values
+            if values is not None
+            else {
+                "temp_sensor": 0,
+                "freq_sensor": 0,
+                "ticks_uC": 0,
+                "sky_brightness": 0,
+            }
+        )
+        self.time = dt if dt is not None else datetime.datetime.utcnow()
 
 
 class UnihedronSQM:
@@ -18,8 +34,9 @@ class UnihedronSQM:
         stopbits: int = 1,
         rtscts: bool = False,
         timeout: int = 10,
+        interval: int = 10,
         *args,
-        **kwargs
+        **kwargs,
     ):
         """
 
@@ -43,6 +60,9 @@ class UnihedronSQM:
         self._stopbits = stopbits
         self._rtscts = rtscts
         self._serial_timeout = timeout
+
+        # stuff
+        self.interval = interval
 
         # poll thread
         self._closing = None
@@ -86,8 +106,6 @@ class UnihedronSQM:
         # init
         serial_errors = 0
         sleep_time = self._thread_sleep
-        last_report = None
-        raw_data = b""
 
         # loop until closing
         while not self._closing.is_set():
@@ -112,75 +130,20 @@ class UnihedronSQM:
                             sleep_time = self._thread_sleep
 
                     # do logging
-                    logging.critical(
-                        "%d failed connections to SQM: %s, sleep %d", serial_errors, str(e), sleep_time
-                    )
+                    logging.critical("%d failed connections to SQM: %s, sleep %d", serial_errors, str(e), sleep_time)
                     self._closing.wait(sleep_time)
 
             # actually read next line and process it
             if self._conn is not None:
-                # read data
-                raw_data += self._conn.read()
+                # read and analyse data
+                data = self.read_data()
+                self._callback(Report(data))
 
-                # extract messages
-                msgs, raw_data = self._extract_messages(raw_data)
-
-                # analyse it
-                for msg in msgs:
-                    self._analyse_message(msg)
-                    last_report = time.time()
+            # sleep
+            time.sleep(self.interval)
 
         # close connection
         self._conn.close()
-
-    def _extract_messages(self, raw_data) -> (list, bytearray):
-        """Extract all complete messages from the raw data from the SQM.
-
-        Args:
-            raw_data: bytearray from SQM (via serial.readline())
-
-        Returns:
-            List of messages and remaining raw data.
-
-        Normally, there should just be a single message per readline, but....
-        """
-
-        # nothing?
-        if not raw_data:
-            return [], b""
-
-        # find complete messages
-        msgs = []
-        while b"\n" in raw_data:
-            # get message
-            pos = raw_data.index(b"\n")
-            msg = raw_data[: pos + 1]
-
-            # store it
-            msgs.append(msg)
-
-            # remove from raw_data
-            raw_data = raw_data[pos + 1 :]
-
-        # return new raw_data and messages
-        return msgs, raw_data
-
-    def _analyse_message(self, raw_data):
-        """Analyse raw message.
-
-        Args:
-            raw_data: Raw data.
-
-        Returns:
-
-        """
-
-        # no data?
-        if len(raw_data) == 0 or raw_data == b"\n":
-            return
-
-        # to string
-        line = raw_data.decode()
 
     def _connect_serial(self):
         """Open/reset serial connection to sensor."""
@@ -203,6 +166,109 @@ class UnihedronSQM:
         # open it
         if not self._conn.is_open:
             self._conn.open()
+
+        # initial calls
+        time.sleep(1)
+        self.read_metadata(tries=10)
+        time.sleep(1)
+        self.cx_readout = self.read_calibration(tries=10)
+        time.sleep(1)
+        self.rx_readout = self.read_data(tries=10)
+
+    def read_buffer(self) -> Optional[str]:
+        """Read the data"""
+        try:
+            return self._conn.readline().decode()
+        except:
+            return None
+
+    def process_metadata(self, msg: str, sep: str = ","):
+        # get Photometer identification codes
+        s = msg.strip().split(sep)
+        protocol_number = int(s[1])
+        model_number = int(s[2])
+        feature_number = int(s[3])
+        serial_number = int(s[4])
+        logging.info(
+            f"Protocol: {protocol_number}, Model: {model_number}, Feature: {feature_number}, Serial: {serial_number}"
+        )
+
+    def read_metadata(self, tries: int = 1):
+        """Read the serial number, firmware version"""
+        self._conn.write("ix".encode())
+        time.sleep(1)
+        msg = self.read_buffer()
+
+        # sanity check
+        if "i" in msg:
+            self.process_metadata(msg)
+        elif tries > 0:
+            self._connect_serial()
+            self.read_metadata(tries - 1)
+
+    def process_calibration(self, msg: str, sep: str = ","):
+        # get calibration
+        s = msg.strip().split(sep)
+        light_calib_offset = float(s[1][:-1])
+        dark_calib_period = float(s[2][:-1])
+        light_calib_temp = float(s[3][:-1])
+        calib_offset = float(s[4][:-1])
+        dark_calib_temp = float(s[5][:-1])
+
+        # log
+        logging.info("Calibration:")
+        logging.info(f"  - Light calibration offset: {light_calib_offset} mag")
+        logging.info(f"  - Dark calibration period: {dark_calib_period} s")
+        logging.info(f"  - Light calibration temperature: {light_calib_temp} C")
+        logging.info(f"  - Calibration offset: {calib_offset} mag")
+        logging.info(f"  - Dark calibration temperature: {dark_calib_temp} C")
+
+    def read_calibration(self, tries=1):
+        """Read the calibration data"""
+        self._conn.write("cx".encode())
+        time.sleep(1)
+        msg = self.read_buffer()
+
+        # Check caldata
+        if "c" in msg:
+            self.process_calibration(msg)
+        elif tries > 0:
+            self._connect_serial()
+            self.read_calibration(tries - 1)
+
+    def process_data(self, msg, sep=","):
+        # Get the measures
+        s = msg.strip().split(sep)
+        sky_brightness = float(s[1][:-1])
+        freq_sensor = float(s[2][:-2])
+        ticks_uC = float(s[3][:-1])
+        period_sensor = float(s[4][:-1])
+        temp_sensor = float(s[5][:-1])
+
+        # For low frequencies, use the period instead
+        if freq_sensor < 30 and period_sensor > 0:
+            freq_sensor = 1.0 / period_sensor
+        return {
+            "temp_sensor": temp_sensor,
+            "freq_sensor": freq_sensor,
+            "ticks_uC": ticks_uC,
+            "sky_brightness": sky_brightness,
+        }
+
+    def read_data(self, tries=1):
+        """Read the SQM and format the Temperature, Frequency and NSB measures"""
+        self._conn.write("rx".encode())
+        time.sleep(1)
+        msg = self.read_buffer()
+
+        # Check data
+        if "r" in msg:
+            return self.process_data(msg)
+        elif tries > 0:
+            self._connect_serial()
+            return self.read_data(tries - 1)
+        else:
+            return None
 
 
 __all__ = ["UnihedronSQM"]

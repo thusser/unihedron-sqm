@@ -8,7 +8,7 @@ import urllib3
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from boltwood.report import Report, SensorsReport
+from sqm.sqm import Report
 
 
 class Influx:
@@ -42,10 +42,10 @@ class Influx:
         self._closing.set()
         self._thread.join()
 
-    def __call__(self, dt: datetime.datetime, values: dict[str, float]):
+    def __call__(self, report: Report):
         """Put a new measurement in the send queue."""
         if self._client is not None:
-            self._queue.put((dt, values))
+            self._queue.put(Report)
 
     def _send_measurements(self):
         """Run until closing to send reports."""
@@ -60,7 +60,7 @@ class Influx:
         # run (almost) forever
         while not self._closing.is_set():
             # get next values to send
-            (dt, values) = self._queue.get()
+            report = self._queue.get()
 
             # send it
             try:
@@ -68,11 +68,11 @@ class Influx:
                     bucket=self._bucket,
                     record={
                         "measurement": "sqm",
-                        "fields": values,
-                        "time": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "fields": {"skymag": report.values["sky_brightness"]},
+                        "time": report.time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     },
                 )
             except urllib3.exceptions.NewConnectionError:
                 # put message back and wait a little
-                self._queue.put((dt, values))
+                self._queue.put(report)
                 time.sleep(10)
