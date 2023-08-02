@@ -45,7 +45,7 @@ class Influx:
     def __call__(self, report: Report):
         """Put a new measurement in the send queue."""
         if self._client is not None:
-            self._queue.put(Report)
+            self._queue.put(report)
 
     def _send_measurements(self):
         """Run until closing to send reports."""
