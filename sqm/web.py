@@ -164,10 +164,10 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d %(message)s")
 
     # parser
-    parser = argparse.ArgumentParser("Lambrecht meteo data logger")
+    parser = argparse.ArgumentParser("Unihedron SQM data logger")
     parser.add_argument("--http-port", type=int, help="HTTP port for web interface", default=8122)
     parser.add_argument("--interval", type=int, help="Interval between measurements in secs", default=10)
-    parser.add_argument("--port", type=str, help="Serial port to Lambrecht", default="/dev/ttyUSB0")
+    parser.add_argument("--port", type=str, help="Serial port to Lambrecht", default="/dev/ttyUSB2")
     parser.add_argument("--baudrate", type=int, help="Baud rate", default=115200)
     parser.add_argument("--bytesize", type=int, help="Byte size", default=8)
     parser.add_argument("--parity", type=str, help="Parity bit", default="N")
