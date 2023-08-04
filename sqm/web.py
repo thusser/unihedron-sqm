@@ -135,7 +135,7 @@ class Application(tornado.web.Application):
 
         # average reports
         average = {k: np.mean([b.values[k] for b in self.buffer]) for k in COLUMNS}
-        time = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        dt = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
 
         # add to history
         self.history.append(Report(average))
@@ -143,20 +143,26 @@ class Application(tornado.web.Application):
 
         # write to log file?
         if self.log_file is not None:
-            # does it exist?
-            if not os.path.exists(self.log_file):
-                # write header
-                with open(self.log_file, "w") as csv:
-                    csv.write(f"time,{','.join(COLUMNS)}\n")
-
-            # write line
-            with open(self.log_file, "a") as csv:
-                fmt = "{time}," + ",".join(["{" + c + ":.2f}" for c in COLUMNS])
-                csv.write(fmt.format(time=time, **average))
-                csv.write("\n")
+            try:
+                self.write_log(dt, average)
+            except:
+                pass
 
         # reset reports
         self.buffer.clear()
+
+    def write_log(self, dt: str, average: dict[str, float]):
+        # does it exist?
+        if not os.path.exists(self.log_file):
+            # write header
+            with open(self.log_file, "w") as csv:
+                csv.write(f"time,{','.join(COLUMNS)}\n")
+
+        # write line
+        with open(self.log_file, "a") as csv:
+            fmt = "{time}," + ",".join(["{" + c + ":.2f}" for c in COLUMNS])
+            csv.write(fmt.format(time=dt, **average))
+            csv.write("\n")
 
 
 def main():
