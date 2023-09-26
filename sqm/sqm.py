@@ -116,56 +116,66 @@ class UnihedronSQM:
         """
 
         # init
-        serial_errors = 0
-        sleep_time = self._thread_sleep
+        self._serial_errors = 0
+        self._sleep_time = self._thread_sleep
 
         # loop until closing
         while not self._closing.is_set():
-            # what about the sun?
-            if self.location is not None:
-                # get sun location
-                sun = get_sun(Time.now()).transform_to(AltAz(location=self.location, obstime=Time.now()))
-
-                # check it
-                if sun.alt.degree > self.max_sun_alt:
-                    time.sleep(30)
-                    continue
-
-            # get serial connection
-            if self._conn is None:
-                logging.info("connecting to Unihedron SQM sensor")
-                try:
-                    # connect
-                    self._connect_serial()
-
-                    # reset sleep time
-                    serial_errors = 0
-                    sleep_time = self._thread_sleep
-
-                except serial.SerialException as e:
-                    # if no connection, log less often
-                    serial_errors += 1
-                    if serial_errors % 10 == 0:
-                        if sleep_time < self._max_thread_sleep:
-                            sleep_time *= 2
-                        else:
-                            sleep_time = self._thread_sleep
-
-                    # do logging
-                    logging.critical("%d failed connections to SQM: %s, sleep %d", serial_errors, str(e), sleep_time)
-                    self._closing.wait(sleep_time)
-
-            # actually read next line and process it
-            if self._conn is not None:
-                # read and analyse data
-                data = self.read_data()
-                self._callback(Report(data))
-
-            # sleep
-            time.sleep(self.interval)
+            try:
+                self._poll()
+            except:
+                # sleep a little and continue
+                logging.exception("Somethingw went wrong")
+                time.sleep(10)
 
         # close connection
         self._conn.close()
+
+    def _poll(self):
+        # what about the sun?
+        if self.location is not None:
+            # get sun location
+            sun = get_sun(Time.now()).transform_to(AltAz(location=self.location, obstime=Time.now()))
+
+            # check it
+            if sun.alt.degree > self.max_sun_alt:
+                time.sleep(30)
+                return
+
+        # get serial connection
+        if self._conn is None:
+            logging.info("connecting to Unihedron SQM sensor")
+            try:
+                # connect
+                self._connect_serial()
+
+                # reset sleep time
+                self._serial_errors = 0
+                self._sleep_time = self._thread_sleep
+
+            except serial.SerialException as e:
+                # if no connection, log less often
+                self._serial_errors += 1
+                if self._serial_errors % 10 == 0:
+                    if self._sleep_time < self._max_thread_sleep:
+                        self._sleep_time *= 2
+                    else:
+                        self._sleep_time = self._thread_sleep
+
+                # do logging
+                logging.critical(
+                    "%d failed connections to SQM: %s, sleep %d", self._serial_errors, str(e), self._sleep_time
+                )
+                self._closing.wait(self._sleep_time)
+
+        # actually read next line and process it
+        if self._conn is not None:
+            # read and analyse data
+            data = self.read_data()
+            self._callback(Report(data))
+
+        # sleep
+        time.sleep(self.interval)
 
     def _connect_serial(self):
         """Open/reset serial connection to sensor."""
