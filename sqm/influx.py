@@ -72,7 +72,7 @@ class Influx:
                         "time": report.time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     },
                 )
-            except urllib3.exceptions.NewConnectionError:
+            except (urllib3.exceptions.NewConnectionError, urllib3.exceptions.ReadTimeoutError):
                 # put message back and wait a little
                 self._queue.put(report)
                 time.sleep(10)
